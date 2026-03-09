@@ -1,0 +1,37 @@
+=== PRICETRACK — SIGA O GUIA: guia-instalacao-vercel.docx ===
+
+ESTRUTURA DOS ARQUIVOS:
+  src/App.js        -> Código principal (dashboard + gráfico mensal)
+  src/index.js      -> Ponto de entrada
+  src/supabase.js   -> Configuração do banco de dados
+  public/index.html -> HTML base
+  package.json      -> Dependências
+
+VARIÁVEIS DE AMBIENTE (configure no Vercel — Passo 9 do guia):
+  REACT_APP_SUPABASE_URL       = URL do seu projeto Supabase
+  REACT_APP_SUPABASE_ANON_KEY  = Chave pública (anon key) do Supabase
+  REACT_APP_ANTHROPIC_KEY      = Chave sk-ant-... da Anthropic
+
+SQL PARA O SUPABASE (Passo 4 do guia — cole no SQL Editor):
+---
+CREATE TABLE receipts (
+  id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
+  user_id uuid REFERENCES auth.users(id),
+  store text, cnpj text, address text,
+  date text, total_bruto numeric, discounts numeric,
+  total_liquido numeric,
+  created_at timestamptz DEFAULT now()
+);
+CREATE TABLE items (
+  id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
+  receipt_id uuid REFERENCES receipts(id),
+  user_id uuid REFERENCES auth.users(id),
+  name text, code text, qty numeric,
+  unit text, unit_price numeric, total numeric,
+  store text, date text
+);
+ALTER TABLE receipts ENABLE ROW LEVEL SECURITY;
+ALTER TABLE items ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "users_own_receipts" ON receipts FOR ALL USING (auth.uid() = user_id);
+CREATE POLICY "users_own_items" ON items FOR ALL USING (auth.uid() = user_id);
+---
