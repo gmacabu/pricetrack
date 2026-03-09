@@ -365,11 +365,11 @@ function UploadView({ user, onUploaded }) {
 ═══════════════════════════════════════════════════════ */
 function MonthlyChart({ receipts }) {
   const [tooltip, setTooltip] = useState(null);
-  const svgRef = useRef();
+  const wrapRef = useRef();
 
   const MONTHS_PT = ['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez'];
 
-  // Build last 12 months data
+  // Build last 12 months — date format is DD/MM/YYYY
   const monthlyData = (() => {
     const now = new Date();
     const result = [];
@@ -377,71 +377,60 @@ function MonthlyChart({ receipts }) {
       const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
       const key = `${String(d.getMonth() + 1).padStart(2,'0')}/${d.getFullYear()}`;
       result.push({
-        key,
-        label: `${MONTHS_PT[d.getMonth()]}/${String(d.getFullYear()).slice(2)}`,
-        month: MONTHS_PT[d.getMonth()],
-        year: d.getFullYear(),
-        total: 0,
-        count: 0,
+        key, label: `${MONTHS_PT[d.getMonth()]}/${String(d.getFullYear()).slice(2)}`,
+        month: MONTHS_PT[d.getMonth()], year: d.getFullYear(),
+        total: 0, count: 0,
       });
     }
-
     receipts.forEach(r => {
       if (!r.date) return;
       const parts = r.date.split('/');
       if (parts.length < 3) return;
+      // parts[0]=DD, parts[1]=MM, parts[2]=YYYY
       const key = `${parts[1]}/${parts[2]}`;
       const slot = result.find(s => s.key === key);
-      if (slot) {
-        slot.total += r.total_liquido || 0;
-        slot.count++;
-      }
+      if (slot) { slot.total += r.total_liquido || 0; slot.count++; }
     });
     return result;
   })();
 
   const maxVal = Math.max(...monthlyData.map(m => m.total), 1);
   const hasData = monthlyData.some(m => m.total > 0);
+  const totalYear = monthlyData.reduce((s, m) => s + m.total, 0);
+  const filledMonths = monthlyData.filter(m => m.total > 0);
+  const avgVal = filledMonths.length ? totalYear / filledMonths.length : 0;
 
-  // SVG dimensions
-  const W = 100; // percentage-based via viewBox
-  const H = 200;
-  const PAD = { top: 20, right: 4, bottom: 36, left: 52 };
-  const chartW = W - PAD.left - PAD.right;
-  const chartH = H - PAD.top - PAD.bottom;
-  const barCount = monthlyData.length;
-  const gap = 0.25;
-  const barW = (chartW / barCount) * (1 - gap);
-  const slotW = chartW / barCount;
+  // Fixed pixel dimensions — no scaling issues
+  const VW = 780, VH = 260;
+  const PAD = { top: 24, right: 16, bottom: 48, left: 72 };
+  const cW = VW - PAD.left - PAD.right;
+  const cH = VH - PAD.top - PAD.bottom;
+  const n = 12;
+  const slotW = cW / n;
+  const barW = slotW * 0.52;
 
-  // Y axis grid lines (4 lines)
-  const gridLines = [0.25, 0.5, 0.75, 1.0].map(f => ({
-    y: PAD.top + chartH * (1 - f),
-    label: `R$${(maxVal * f).toFixed(0)}`,
-  }));
+  const barX = (i) => PAD.left + slotW * i + (slotW - barW) / 2;
+  const barH = (total) => total > 0 ? Math.max((total / maxVal) * cH, 3) : 0;
+  const barY = (total) => PAD.top + cH - barH(total);
+  const dotX = (i) => PAD.left + slotW * i + slotW / 2;
+  const dotY = (total) => PAD.top + cH - (total / maxVal) * cH;
 
-  // Line path (average trend)
-  const points = monthlyData.map((m, i) => {
-    const x = PAD.left + slotW * i + slotW / 2;
-    const y = m.total > 0 ? PAD.top + chartH * (1 - m.total / maxVal) : null;
-    return { x, y, m };
-  }).filter(p => p.y !== null);
+  // Trend line through filled months only
+  const pts = monthlyData
+    .map((m, i) => m.total > 0 ? { x: dotX(i), y: dotY(m.total), m } : null)
+    .filter(Boolean);
+  const linePath = pts.length > 1
+    ? pts.map((p, i) => `${i === 0 ? 'M' : 'L'}${p.x},${p.y}`).join(' ') : '';
+  const areaPath = pts.length > 1
+    ? `${linePath} L${pts[pts.length-1].x},${PAD.top+cH} L${pts[0].x},${PAD.top+cH} Z` : '';
 
-  const linePath = points.length > 1
-    ? points.map((p, i) => `${i === 0 ? 'M' : 'L'}${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ')
-    : '';
+  // Avg line Y
+  const avgY = avgVal > 0 ? PAD.top + cH * (1 - avgVal / maxVal) : null;
 
-  const areaPath = points.length > 1
-    ? `${linePath} L${points[points.length-1].x.toFixed(1)},${(PAD.top + chartH).toFixed(1)} L${points[0].x.toFixed(1)},${(PAD.top + chartH).toFixed(1)} Z`
-    : '';
-
-  const handleMouseMove = (e, m, i) => {
-    if (!m.total) return;
-    const rect = svgRef.current?.getBoundingClientRect();
-    if (!rect) return;
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
-    setTooltip({ x, y, m });
+  const handleMove = (e, m) => {
+    if (!m.total || !wrapRef.current) return;
+    const rect = wrapRef.current.getBoundingClientRect();
+    setTooltip({ x: e.clientX - rect.left, y: e.clientY - rect.top, m });
   };
 
   return (
@@ -449,156 +438,110 @@ function MonthlyChart({ receipts }) {
       <div className="monthly-chart-header">
         <div>
           <h3>📅 Consumo por Mês</h3>
-          <div style={{ fontSize: 11, color: G.muted, marginTop: 4 }}>Últimos 12 meses</div>
+          <div style={{ fontSize: 11, color: G.muted, marginTop: 4 }}>
+            Últimos 12 meses · Total: R${totalYear.toFixed(2)} · Média: R${avgVal.toFixed(2)}/mês
+          </div>
         </div>
         <div className="chart-legend">
-          <div className="legend-item">
-            <div className="legend-dot" style={{ background: G.accent }} />
-            <span>Gasto mensal</span>
-          </div>
-          <div className="legend-item">
-            <div className="legend-dot" style={{ background: G.blue }} />
-            <span>Tendência</span>
-          </div>
+          <div className="legend-item"><div className="legend-dot" style={{ background: G.accent }} /><span>Gasto</span></div>
+          <div className="legend-item"><div className="legend-dot" style={{ background: G.blue }} /><span>Tendência</span></div>
+          <div className="legend-item"><div className="legend-dot" style={{ background: G.warn }} /><span>Média</span></div>
         </div>
       </div>
 
-      {!hasData ? (
-        <div style={{ textAlign: 'center', padding: '32px', color: G.muted, fontSize: 13 }}>
-          Importe mais notas para ver a evolução mensal
-        </div>
-      ) : (
-        <div className="svg-chart-wrap" ref={svgRef} onMouseLeave={() => setTooltip(null)}>
-          <svg
-            viewBox={`0 0 ${W} ${H}`}
-            style={{ width: '100%', height: 'auto', display: 'block', overflow: 'visible' }}
-            preserveAspectRatio="none"
-          >
-            <defs>
-              <linearGradient id="barGrad" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" stopColor={G.accent} stopOpacity="0.9" />
-                <stop offset="100%" stopColor={G.accent} stopOpacity="0.3" />
-              </linearGradient>
-              <linearGradient id="areaGrad" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" stopColor={G.blue} stopOpacity="0.25" />
-                <stop offset="100%" stopColor={G.blue} stopOpacity="0.0" />
-              </linearGradient>
-            </defs>
+      {!hasData
+        ? <div style={{ textAlign:'center', padding:'32px', color:G.muted, fontSize:13 }}>Importe mais notas para ver a evolução mensal</div>
+        : <div className="svg-chart-wrap" ref={wrapRef} onMouseLeave={() => setTooltip(null)}>
+            <svg viewBox={`0 0 ${VW} ${VH}`} style={{ width:'100%', height:'auto', display:'block' }}>
+              <defs>
+                <linearGradient id="barGrad" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor={G.accent} stopOpacity="0.9"/>
+                  <stop offset="100%" stopColor={G.accent} stopOpacity="0.25"/>
+                </linearGradient>
+                <linearGradient id="areaGrad" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor={G.blue} stopOpacity="0.2"/>
+                  <stop offset="100%" stopColor={G.blue} stopOpacity="0"/>
+                </linearGradient>
+              </defs>
 
-            {/* Grid lines */}
-            {gridLines.map((gl, i) => (
-              <g key={i}>
-                <line
-                  x1={PAD.left} y1={gl.y} x2={W - PAD.right} y2={gl.y}
-                  stroke={G.border} strokeWidth="0.4" strokeDasharray="1.5,1.5"
-                />
-                <text x={PAD.left - 2} y={gl.y + 1} textAnchor="end"
-                  fontSize="3.8" fill={G.muted} fontFamily="Space Mono, monospace">
-                  {gl.label}
-                </text>
-              </g>
-            ))}
-
-            {/* Baseline */}
-            <line
-              x1={PAD.left} y1={PAD.top + chartH}
-              x2={W - PAD.right} y2={PAD.top + chartH}
-              stroke={G.border} strokeWidth="0.6"
-            />
-
-            {/* Bars */}
-            {monthlyData.map((m, i) => {
-              const x = PAD.left + slotW * i + (slotW - barW) / 2;
-              const barH2 = m.total > 0 ? Math.max((m.total / maxVal) * chartH, 1) : 0;
-              const y = PAD.top + chartH - barH2;
-              const isHovered = tooltip?.m?.key === m.key;
-              return (
-                <g key={i} onMouseMove={e => handleMouseMove(e, m, i)} style={{ cursor: m.total ? 'pointer' : 'default' }}>
-                  {/* Hover zone */}
-                  <rect x={PAD.left + slotW * i} y={PAD.top} width={slotW} height={chartH + 1}
-                    fill="transparent" />
-                  {/* Bar */}
-                  {m.total > 0 && (
-                    <rect
-                      x={x} y={y} width={barW} height={barH2}
-                      fill={isHovered ? G.accentHover : 'url(#barGrad)'}
-                      rx="1" ry="1"
-                      style={{ transition: 'fill .15s' }}
-                    />
-                  )}
-                  {/* Month label */}
-                  <text
-                    x={PAD.left + slotW * i + slotW / 2}
-                    y={PAD.top + chartH + 9}
-                    textAnchor="middle"
-                    fontSize="3.5"
-                    fill={isHovered ? G.accent : G.muted}
-                    fontFamily="Plus Jakarta Sans, sans-serif"
-                    fontWeight={isHovered ? '700' : '400'}
-                  >
-                    {m.label}
-                  </text>
-                  {/* Value on top of bar when hovered */}
-                  {isHovered && m.total > 0 && (
-                    <text
-                      x={x + barW / 2} y={y - 2}
-                      textAnchor="middle" fontSize="3.6"
-                      fill={G.accent} fontFamily="Space Mono, monospace" fontWeight="700"
-                    >
-                      R${m.total.toFixed(0)}
+              {/* Y grid */}
+              {[0.25, 0.5, 0.75, 1.0].map((f, i) => {
+                const y = PAD.top + cH * (1 - f);
+                return (
+                  <g key={i}>
+                    <line x1={PAD.left} y1={y} x2={VW - PAD.right} y2={y}
+                      stroke={G.border} strokeWidth="0.8" strokeDasharray="4,4"/>
+                    <text x={PAD.left - 6} y={y + 4} textAnchor="end"
+                      fontSize="11" fill={G.muted} fontFamily="Space Mono, monospace">
+                      R${(maxVal * f).toFixed(0)}
                     </text>
-                  )}
-                </g>
-              );
-            })}
+                  </g>
+                );
+              })}
 
-            {/* Area under line */}
-            {areaPath && (
-              <path d={areaPath} fill="url(#areaGrad)" />
+              {/* Baseline */}
+              <line x1={PAD.left} y1={PAD.top + cH} x2={VW - PAD.right} y2={PAD.top + cH}
+                stroke={G.border} strokeWidth="1"/>
+
+              {/* Avg line */}
+              {avgY && <>
+                <line x1={PAD.left} y1={avgY} x2={VW - PAD.right} y2={avgY}
+                  stroke={G.warn} strokeWidth="1" strokeDasharray="6,4" opacity="0.7"/>
+                <text x={VW - PAD.right + 4} y={avgY + 4} fontSize="10" fill={G.warn} fontFamily="Space Mono, monospace">avg</text>
+              </>}
+
+              {/* Area + trend line */}
+              {areaPath && <path d={areaPath} fill="url(#areaGrad)"/>}
+              {linePath && <path d={linePath} fill="none" stroke={G.blue} strokeWidth="1.5"
+                strokeLinecap="round" strokeLinejoin="round" opacity="0.85"/>}
+
+              {/* Bars + labels */}
+              {monthlyData.map((m, i) => {
+                const hovered = tooltip?.m?.key === m.key;
+                const bx = barX(i), bh = barH(m.total), by = barY(m.total);
+                const lx = dotX(i), ly = PAD.top + cH + 14;
+                return (
+                  <g key={i} onMouseMove={e => handleMove(e, m)} onMouseLeave={() => setTooltip(null)}
+                    style={{ cursor: m.total ? 'pointer' : 'default' }}>
+                    {/* invisible hover zone */}
+                    <rect x={PAD.left + slotW * i} y={PAD.top} width={slotW} height={cH + 1} fill="transparent"/>
+                    {/* bar */}
+                    {m.total > 0 && (
+                      <rect x={bx} y={by} width={barW} height={bh}
+                        fill={hovered ? G.accentHover : 'url(#barGrad)'} rx="2" ry="2"/>
+                    )}
+                    {/* rotated month label */}
+                    <text transform={`translate(${lx},${ly}) rotate(-40)`}
+                      textAnchor="end" fontSize="11"
+                      fill={hovered ? G.accent : G.muted}
+                      fontFamily="Plus Jakarta Sans, sans-serif"
+                      fontWeight={hovered ? '700' : '400'}>
+                      {m.label}
+                    </text>
+                  </g>
+                );
+              })}
+
+              {/* Trend dots */}
+              {pts.map((p, i) => (
+                <circle key={i} cx={p.x} cy={p.y} r="3"
+                  fill={tooltip?.m?.key === p.m.key ? G.accentHover : G.blue}
+                  stroke={G.card} strokeWidth="1.5"/>
+              ))}
+            </svg>
+
+            {tooltip && (
+              <div className="chart-tooltip" style={{
+                left: Math.min(tooltip.x + 14, (wrapRef.current?.offsetWidth || 500) - 150),
+                top: Math.max(tooltip.y - 60, 4),
+              }}>
+                <div className="tt-month">{tooltip.m.month} {tooltip.m.year}</div>
+                <div className="tt-val">R$ {tooltip.m.total.toFixed(2)}</div>
+                <div className="tt-count">{tooltip.m.count} nota{tooltip.m.count !== 1 ? 's' : ''}</div>
+              </div>
             )}
-
-            {/* Trend line */}
-            {linePath && (
-              <path
-                d={linePath}
-                fill="none"
-                stroke={G.blue}
-                strokeWidth="0.8"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeDasharray="none"
-                opacity="0.8"
-              />
-            )}
-
-            {/* Dots on line */}
-            {points.map((p, i) => (
-              <circle
-                key={i} cx={p.x} cy={p.y} r="1.2"
-                fill={tooltip?.m?.key === p.m.key ? G.accentHover : G.blue}
-                stroke={G.card} strokeWidth="0.5"
-                style={{ transition: 'fill .15s' }}
-              />
-            ))}
-          </svg>
-
-          {/* Tooltip */}
-          {tooltip && (
-            <div
-              className="chart-tooltip"
-              style={{
-                left: Math.min(tooltip.x + 12, (svgRef.current?.offsetWidth || 400) - 140),
-                top: Math.max(tooltip.y - 52, 0),
-                opacity: 1,
-              }}
-            >
-              <div className="tt-month">{tooltip.m.month} {tooltip.m.year}</div>
-              <div className="tt-val">R$ {tooltip.m.total.toFixed(2)}</div>
-              <div className="tt-count">{tooltip.m.count} nota{tooltip.m.count !== 1 ? 's' : ''}</div>
-            </div>
-          )}
-        </div>
-      )}
+          </div>
+      }
     </div>
   );
 }
