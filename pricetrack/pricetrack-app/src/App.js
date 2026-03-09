@@ -171,38 +171,19 @@ select.s-input{cursor:pointer;}
 `;
 
 /* ═══════════════════════════════════════════════════════
-   CLAUDE API — extração NFCe
+   CLAUDE API — extração NFCe via proxy Vercel (/api/extract)
 ═══════════════════════════════════════════════════════ */
 async function extractNFCe(base64PDF) {
-  const res = await fetch('https://api.anthropic.com/v1/messages', {
+  const res = await fetch('/api/extract', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      model: 'claude-sonnet-4-20250514',
-      max_tokens: 4000,
-      messages: [{
-        role: 'user',
-        content: [
-          { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: base64PDF } },
-          { type: 'text', text: `Extraia todas as informações desta NFCe e retorne APENAS um JSON válido, sem markdown:
-{
-  "store": "nome do estabelecimento",
-  "cnpj": "XX.XXX.XXX/XXXX-XX",
-  "address": "endereço",
-  "date": "DD/MM/YYYY",
-  "items": [{"name":"","code":"","qty":0,"unit":"","unitPrice":0,"total":0}],
-  "totalBruto": 0,
-  "discounts": 0,
-  "totalLiquido": 0
-}` }
-        ]
-      }]
-    })
+    body: JSON.stringify({ base64PDF })
   });
-  if (!res.ok) throw new Error(`API error ${res.status}`);
-  const d = await res.json();
-  const txt = d.content.map(c => c.text || '').join('');
-  return JSON.parse(txt.replace(/```json|```/g, '').trim());
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || `Erro HTTP ${res.status}`);
+  }
+  return res.json();
 }
 
 /* ═══════════════════════════════════════════════════════
