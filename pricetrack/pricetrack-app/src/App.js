@@ -567,11 +567,11 @@ function DashboardView({ user }) {
       const { data: items } = await supabase
         .from('items').select('name, code, total')
         .eq('user_id', user.id);
-      // group
+      // group by normalized name (name is already UPPERCASE from save)
       const map = {};
       (items || []).forEach(it => {
-        const k = it.code || it.name;
-        if (!map[k]) map[k] = { name: it.name, count: 0, total: 0 };
+        const k = (it.name || '').toUpperCase().trim();
+        if (!map[k]) map[k] = { name: k, count: 0, total: 0 };
         map[k].count++;
         map[k].total += it.total || 0;
       });
@@ -670,11 +670,11 @@ function ItemsView({ user }) {
         .from('items').select('name, code, unit_price, total, store, date, qty, unit')
         .eq('user_id', user.id);
 
-      // group by code/name
+      // group strictly by normalized name — code is unreliable for loose-weight items
       const map = {};
       (data || []).forEach(it => {
-        const k = it.code || it.name;
-        if (!map[k]) map[k] = { name: it.name, code: it.code, entries: [] };
+        const k = (it.name || '').toUpperCase().trim();
+        if (!map[k]) map[k] = { name: k, code: it.code, entries: [] };
         map[k].entries.push(it);
       });
       setProducts(Object.values(map).sort((a, b) => a.name.localeCompare(b.name)));
