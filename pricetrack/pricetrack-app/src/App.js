@@ -298,7 +298,7 @@ function UploadView({ user, onUploaded }) {
         .from('receipts')
         .insert({
           user_id: user.id,
-          store: data.store,
+          store: (data.store || '').toUpperCase().trim(),
           cnpj: data.cnpj,
           address: data.address,
           date: data.date,
@@ -311,17 +311,18 @@ function UploadView({ user, onUploaded }) {
 
       if (re) throw new Error(re.message);
 
-      // Insert items
+      // Insert items — normaliza nome/unidade para MAIÚSCULAS para evitar duplicatas
+      const normalize = (s) => (s || '').toUpperCase().trim();
       const items = (data.items || []).map(it => ({
         receipt_id: receipt.id,
         user_id: user.id,
-        name: it.name,
-        code: it.code,
+        name: normalize(it.name),
+        code: (it.code || '').trim(),
         qty: it.qty,
-        unit: it.unit,
+        unit: normalize(it.unit),
         unit_price: it.unitPrice,
         total: it.total,
-        store: data.store,
+        store: normalize(data.store),
         date: data.date,
       }));
 
